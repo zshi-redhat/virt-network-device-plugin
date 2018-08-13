@@ -1,0 +1,22 @@
+apiVersion: v1
+kind: Pod
+metadata:
+  name: testpod3
+  labels:
+    env: test
+  annotations:
+    k8s.v1.cni.cncf.io/networks: virt-net1
+spec:
+  containers:
+  - name: appcntr3
+    image: centos/tools
+    imagePullPolicy: IfNotPresent
+    command: [ "/bin/bash", "-c", "--" ]
+    args: [ "while true; do sleep 300000; done;" ]
+    resources:
+      requests:
+        memory: "128Mi"
+        kernel.org/virt: '1'
+      limits:
+        memory: "128Mi"
+        kernel.org/virt: '1'
