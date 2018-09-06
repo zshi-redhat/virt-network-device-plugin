@@ -15,6 +15,7 @@
 package main
 
 import (
+	"bufio"
 	"flag"
 	"fmt"
 	"io/ioutil"
@@ -36,6 +37,7 @@ import (
 
 const (
 	netDirectory    = "/sys/class/net/"
+	routePath       = "/proc/net/route"
 
 	// Device plugin settings.
 	pluginMountPath      = "/var/lib/kubelet/device-plugins"
@@ -63,6 +65,7 @@ func newVirtManager() *virtManager {
 func getVirtualInterfaceList() ([]string, error) {
 
 	virtNetDevices := []string{}
+	var defaultInt string
 
 	netDevices, err := ioutil.ReadDir(netDirectory)
 	if err != nil {
@@ -75,7 +78,27 @@ func getVirtualInterfaceList() ([]string, error) {
 		return virtNetDevices, err
 	}
 
+	routeFile, err := os.Open(routePath)
+	if err != nil {
+		glog.Errorf("Error. Cannot read %s for default route interface. Err: %v", routePath, err)
+		return virtNetDevices, err
+	}
+	defer routeFile.Close()
+
+	scanner := bufio.NewScanner(routeFile)
+	for scanner.Scan() {
+		scanner.Scan()
+		defaultInt = strings.Split(scanner.Text(), "\t")[0]
+		break
+	}
+
 	for _, dev := range netDevices {
+
+		if dev.Name() == defaultInt {
+			glog.Infof("Skipping default interface %s ", defaultInt)
+			continue
+		}
+
 		driverPath := filepath.Join(netDirectory, dev.Name(), "device", "driver")
 		glog.Infof("Checking for file %s ", driverPath)
 
