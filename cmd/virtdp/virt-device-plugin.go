@@ -304,6 +304,7 @@ func (vm *virtManager) Allocate(ctx context.Context, rqt *pluginapi.AllocateRequ
 
 func main() {
 	flag.Parse()
+	defer glog.Flush()
 	glog.Infof("Starting Virt Network Device Plugin...")
 	vm := newVirtManager()
 	if vm == nil {
