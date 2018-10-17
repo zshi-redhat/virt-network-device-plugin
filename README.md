@@ -23,7 +23,7 @@ The goal of the Virt Network device plugin is to simulate the lifecycle manageme
 
   - Allocation of virtual interface to a pod
 
-- Meta plugin
+- Meta CNI plugin (e.g Multus)
 
   - Retrieve allocated DeviceIDs and associated resourceName from kubernetes APIServer.
 
@@ -41,15 +41,15 @@ This implementation follows the directions of [this proposal document](https://d
 
 There are list of items should be required before installing the Virt Network device plugin:
 
- 1. Virtual interfaces - (Tested with virtio_net)
+ 1. Virtual interfaces - (Virt-network-device-plugin discovers devices with virtio_net driver type as available hardware resource, it assumes virtio_net interface has already been created in the VM where virt-network-device-plugin is running)
 
  2. Enhanced host-device CNI ([link](https://github.com/zshi-redhat/ehost-device-cni.git))
 
- 3. Kubernetes version - 1.11+ (with [patch](https://github.com/kubernetes/kubernetes/compare/master...dashpole:device_id#diff-bf28da68f62a8df6e99e447c4351122))
+ 3. Kubernetes version - 1.10+
 
- 4. Meta plugin - Multus v3.0 (dev/k8s-deviceid-model branch)
+ 4. Meta plugin - Multus (master branch)
 
-Make sure to implement the steps described in [Quick Start](#quick-start) for Kubernetes cluster to support multi network.  Similar with SRIOV network device plugin, Virt network device plugin is a collective plugin model to work with device plugin, Meta-plugin and CNI plugin.
+Make sure to implement the steps described in [Quick Start](#quick-start) for Kubernetes cluster to support multi network.  Similar with SRIOV network device plugin, Virt network device plugin is a collective plugin model to work with CNI plugins.
 
 ### Supported virtual NICs
 The following virtual NIC was tested with this implementation.
@@ -64,21 +64,17 @@ Kubernetes out of the box only allows to have one network interface per pod. In 
 
 ### Meta Plugin CNI
 
-1. Compile Meta Plugin CNI (Multus dev/k8s-deviceid-model branch):
+1. Compile Meta Plugin CNI (Multus master branch):
 ````
 $ git clone https://github.com/intel/multus-cni.git
 $ cd multus-cni
-$ git fetch
-$ git checkout dev/k8s-deviceid-model
 $ ./build
 $ cp bin/multus /opt/cni/bin
 ````
 
-2. Configure Kubernetes network CRD with [Multus](https://github.com/intel/multus-cni/tree/dev/network-plumbing-working-group-crd-change#creating-network-resources-in-kubernetes)
-
 ### Enhanced host-device CNI
 
-1. Compile host-device CNI:
+1. Compile host-device CNI plugin:
 ```
     $ git clone https://github.com/zshi-redhat/ehost-device-cni.git
     $ cd ehost-device-cni
@@ -95,23 +91,28 @@ $ git clone https://github.com/zshi-redhat/virt-network-device-plugin.git
 
  2. Run the build script, this will build the Virt Network Device Plugin binary
  ``` 
+$ cd virt-network-device-plugin/
 $ ./build.sh
 ```      
 
- 3. Create the virt Network CRD
-```
-$ kubectl create -f deployments/virt-crd.yaml
-```
- 
- 4. Run build docker script to create Virt Network Device Plugin Docker image
+ 3. Run build docker script to create Virt Network Device Plugin Docker image
  ```
 $ cd deployments/
 $ ./build_docker.sh
+
 ``` 
+
+ 4. Create the virt Network CRD
+```
+$ kubectl create -f crdnetwork.yaml
+$ kubectl create -f virt-crd.yaml
+```
+
  5. Create Virt Network Device Plugin Pod
  ```
 $ kubectl create -f pod-virtdp.yaml
 ```
+
  >Note: This is for demo purposes, the Virt Device Plugin binary must be executed from within the pod
 
  6. Get a bash terminal to the Virt Network Device Plugin Pod
