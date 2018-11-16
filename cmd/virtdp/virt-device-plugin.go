@@ -61,10 +61,10 @@ func newVirtManager() *virtManager {
 }
 
 // Returns a list of virtual interface names as string
-func getVirtualInterfaceList() ([]string, error) {
+func getVirtualInterfaceList() (map[string]string, error) {
 
-	virtNetDevices := []string{}
-	var defaultInt string
+	virtNetDevices := make(map[string]string)
+	var defaultInterface string
 
 	netDevices, err := ioutil.ReadDir(netDirectory)
 	if err != nil {
@@ -87,14 +87,14 @@ func getVirtualInterfaceList() ([]string, error) {
 	scanner := bufio.NewScanner(routeFile)
 	for scanner.Scan() {
 		scanner.Scan()
-		defaultInt = strings.Split(scanner.Text(), "\t")[0]
+		defaultInterface = strings.Split(scanner.Text(), "\t")[0]
 		break
 	}
 
 	for _, dev := range netDevices {
 
-		if dev.Name() == defaultInt {
-			glog.Infof("Skipping default interface %s ", defaultInt)
+		if dev.Name() == defaultInterface {
+			glog.Infof("Skipping default interface %s ", defaultInterface)
 			continue
 		}
 
@@ -119,7 +119,7 @@ func getVirtualInterfaceList() ([]string, error) {
 			glog.Infof("deviceInfo: %s", deviceInfo)
 			pciStr := deviceInfo[len("../../devices/pci0000:00/"):]
 			pciAddr := strings.Split(pciStr, "/")
-			virtNetDevices = append(virtNetDevices, pciAddr[0])
+			virtNetDevices[dev.Name()] = pciAddr[0]
 		}
 	}
 
@@ -129,20 +129,60 @@ func getVirtualInterfaceList() ([]string, error) {
 //Reads DeviceName and gets PCI Addresses of virtual interfaces
 func (vm *virtManager) discoverNetworks() error {
 
-	virtList, err := getVirtualInterfaceList()
+	var healthValue string
+	virtMap, err := getVirtualInterfaceList()
 	if err != nil {
 		glog.Errorf("Error. No Virtual network device found")
 		return err
 	}
-	for _, dev := range virtList {
-		vm.devices[dev] = pluginapi.Device{ID: dev, Health: pluginapi.Healthy}
+	for name, addr := range virtMap {
+		if IsNetlinkStatusUp(name) {
+			healthValue = pluginapi.Healthy
+		} else {
+			healthValue = "Unhealthy"
+		}
+		vm.devices[addr] = pluginapi.Device{ID: addr, Health: healthValue}
 	}
 	return nil
 }
 
-func (vm *virtManager) GetDeviceState(DeviceName string) string {
-	// TODO: Discover device health
-	return pluginapi.Healthy
+// IsNetlinkStatusUp returns 'false' if 'operstate' is not "up" for a Linux netowrk device
+func IsNetlinkStatusUp(dev string) bool {
+	opsFile := filepath.Join(netDirectory, dev, "operstate")
+	bytes, err := ioutil.ReadFile(opsFile)
+	if err != nil || strings.TrimSpace(string(bytes)) != "up" {
+		return false
+	}
+	return true
+}
+
+// Probe returns 'true' if device changes detected 'false' otherwise
+func (vm *virtManager) Probe() bool {
+
+// TODO Probe link state of allocated device in another network namespace
+/*
+	var healthValue string
+	currentDevices := make(map[string]pluginapi.Device)
+
+	virtMap, err := getVirtualInterfaceList()
+	if err != nil {
+		glog.Errorf("Error. No Virtual network device found")
+		return false
+	}
+	for name, addr := range virtMap {
+		if IsNetlinkStatusUp(name) {
+			healthValue = pluginapi.Healthy
+		} else {
+			healthValue = "Unhealthy"
+		}
+		currentDevices[addr] = pluginapi.Device{ID: addr, Health: healthValue}
+	}
+	if !reflect.DeepEqual(vm.devices, currentDevices) {
+		vm.devices = currentDevices
+		return true
+	}
+*/
+	return false
 }
 
 // Discovers capabable virtual devices
@@ -218,17 +258,23 @@ func (vm *virtManager) NotifyRegistrationStatus(ctx context.Context, regstat *re
 
 // Implements DevicePlugin service functions
 func (vm *virtManager) ListAndWatch(empty *pluginapi.Empty, stream pluginapi.DevicePlugin_ListAndWatchServer) error {
-	changed := true
+	resp := new(pluginapi.ListAndWatchResponse)
+	for _, dev := range vm.devices {
+		resp.Devices = append(resp.Devices, &pluginapi.Device{ID: dev.ID, Health: dev.Health})
+	}
+	glog.Infof("ListAndWatch: send initial devices %v\n", resp)
+	if err := stream.Send(resp); err != nil {
+		glog.Errorf("Error. Cannot update initial device states: %v\n", err)
+		vm.grpcServer.Stop()
+		return err
+	}
+
 	for {
-		for id, dev := range vm.devices {
-			state := vm.GetDeviceState(id)
-			if dev.Health != state {
-				changed = true
-				dev.Health = state
-				vm.devices[id] = dev
-			}
+		select {
+		case <-time.After(10 * time.Second):
 		}
-		if changed {
+
+		if vm.Probe() {
 			resp := new(pluginapi.ListAndWatchResponse)
 			for _, dev := range vm.devices {
 				resp.Devices = append(resp.Devices, &pluginapi.Device{ID: dev.ID, Health: dev.Health})
@@ -240,8 +286,6 @@ func (vm *virtManager) ListAndWatch(empty *pluginapi.Empty, stream pluginapi.Dev
 				return err
 			}
 		}
-		changed = false
-		time.Sleep(5 * time.Second)
 	}
 	return nil
 }
