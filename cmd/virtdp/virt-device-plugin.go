@@ -22,7 +22,6 @@ import (
 	"net"
 	"os"
 	"os/signal"
-	"path"
 	"path/filepath"
 	"strings"
 	"syscall"
@@ -33,6 +32,7 @@ import (
 	"google.golang.org/grpc"
 
 	pluginapi "k8s.io/kubernetes/pkg/kubelet/apis/deviceplugin/v1beta1"
+	registerapi "k8s.io/kubernetes/pkg/kubelet/apis/pluginregistration/v1beta1"
 )
 
 const (
@@ -40,8 +40,7 @@ const (
 	routePath       = "/proc/net/route"
 
 	// Device plugin settings.
-	pluginMountPath      = "/var/lib/kubelet/device-plugins"
-	kubeletEndpoint      = "kubelet.sock"
+	pluginMountPath      = "/var/lib/kubelet/plugins"
 	pluginEndpointPrefix = "virtNet"
 	resourceName         = "kernel.org/virt"
 )
@@ -148,11 +147,7 @@ func (vm *virtManager) GetDeviceState(DeviceName string) string {
 
 // Discovers capabable virtual devices
 func (vm *virtManager) Start() error {
-	glog.Infof("Discovering virtual network device[s]")
-	if err := vm.discoverNetworks(); err != nil {
-		return err
-	}
-	pluginEndpoint := filepath.Join(pluginapi.DevicePluginPath, vm.socketFile)
+	pluginEndpoint := filepath.Join(pluginMountPath, vm.socketFile)
 	glog.Infof("Starting Virtual Network Device Plugin server at: %s\n", pluginEndpoint)
 	lis, err := net.Listen("unix", pluginEndpoint)
 	if err != nil {
@@ -161,6 +156,7 @@ func (vm *virtManager) Start() error {
 	vm.grpcServer = grpc.NewServer()
 
 	// Register virt device plugin service
+	registerapi.RegisterRegistrationServer(vm.grpcServer, vm)
 	pluginapi.RegisterDevicePluginServer(vm.grpcServer, vm)
 
 	go vm.grpcServer.Serve(lis)
@@ -197,7 +193,7 @@ func (vm *virtManager) Stop() error {
 // Removes existing socket if exists
 // [adpoted from https://github.com/redhat-nfvpe/k8s-dummy-device-plugin/blob/master/dummy.go ]
 func (vm *virtManager) cleanup() error {
-	pluginEndpoint := filepath.Join(pluginapi.DevicePluginPath, vm.socketFile)
+	pluginEndpoint := filepath.Join(pluginMountPath, vm.socketFile)
 	if err := os.Remove(pluginEndpoint); err != nil && !os.IsNotExist(err) {
 		return err
 	}
@@ -205,30 +201,19 @@ func (vm *virtManager) cleanup() error {
 	return nil
 }
 
-// Register registers as a grpc client with the kubelet.
-func Register(kubeletEndpoint, pluginEndpoint, resourceName string) error {
-	conn, err := grpc.Dial(kubeletEndpoint, grpc.WithInsecure(),
-		grpc.WithDialer(func(addr string, timeout time.Duration) (net.Conn, error) {
-			return net.DialTimeout("unix", addr, timeout)
-		}))
-	if err != nil {
-		glog.Errorf("Virt Network Device Plugin cannot connect to Kubelet service: %v", err)
-		return err
-	}
-	defer conn.Close()
-	client := pluginapi.NewRegistrationClient(conn)
+func (vm *virtManager) GetInfo(ctx context.Context, rqt *registerapi.InfoRequest) (*registerapi.PluginInfo, error) {
+	return &registerapi.PluginInfo{Type: registerapi.DevicePlugin, Name: resourceName, Endpoint: filepath.Join(pluginMountPath, vm.socketFile), SupportedVersions: []string{"v1beta1"}}, nil
+}
 
-	request := &pluginapi.RegisterRequest{
-		Version:      pluginapi.Version,
-		Endpoint:     pluginEndpoint,
-		ResourceName: resourceName,
+func (vm *virtManager) NotifyRegistrationStatus(ctx context.Context, regstat *registerapi.RegistrationStatus) (*registerapi.RegistrationStatusResponse, error) {
+	out := new(registerapi.RegistrationStatusResponse)
+	if regstat.PluginRegistered {
+		glog.Infof("Plugin: %s gets registered successfully at Kubelet\n", vm.socketFile)
+	} else {
+		glog.Infof("Plugin:%s failed to registered at Kubelet: %v; shutting down.\n", vm.socketFile, regstat.Error)
+		vm.Stop()
 	}
-
-	if _, err = client.Register(context.Background(), request); err != nil {
-		glog.Errorf("Virt Network Device Plugin cannot register to Kubelet service: %v", err)
-		return err
-	}
-	return nil
+	return out, nil
 }
 
 // Implements DevicePlugin service functions
@@ -317,21 +302,16 @@ func main() {
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, syscall.SIGHUP, syscall.SIGINT, syscall.SIGTERM, syscall.SIGQUIT)
 
+	// Discover VIRT network device(s)
+	if err := vm.discoverNetworks(); err != nil {
+		glog.Errorf("virtManager.discoverNetworks() failed: %v", err)
+		return
+	}
 	// Start server
 	if err := vm.Start(); err != nil {
 		glog.Errorf("virtManager.Start() failed: %v", err)
 		return
 	}
-
-	// Registers with Kubelet.
-	err := Register(path.Join(pluginMountPath, kubeletEndpoint), vm.socketFile, resourceName)
-	if err != nil {
-		// Stop server
-		vm.grpcServer.Stop()
-		glog.Fatal(err)
-		return
-	}
-	glog.Infof("Virt Network Device Plugin registered with the Kubelet")
 
 	// Catch termination signals
 	select {
