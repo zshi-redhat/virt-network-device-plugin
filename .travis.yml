@@ -1,0 +1,23 @@
+language: go
+
+script:
+  - ./build.sh
+  - docker build -t nfvpe/virtdp -f ./images/Dockerfile .
+
+before_deploy:
+  - docker login -u "$REGISTRY_USER" -p "$REGISTRY_PASS"
+  - docker tag nfvpe/virtdp zenghui/virtdp
+
+deploy:
+  - provider: script
+    skip_cleanup: true
+    script: docker push nfvpe/virtdp
+    on:
+      all_branches: true
+      condition: $TRAVIS_BRANCH =~ ^travis
+  - provider: script
+    skip_cleanup: true
+    script: docker push zenghui/virtdp
+    on:
+      all_branches: true
+      condition: $TRAVIS_BRANCH =~ ^travis
