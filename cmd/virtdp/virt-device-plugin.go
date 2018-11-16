@@ -159,11 +159,14 @@ func IsNetlinkStatusUp(dev string) bool {
 // Probe returns 'true' if device changes detected 'false' otherwise
 func (vm *virtManager) Probe() bool {
 
-// TODO Probe link state of allocated device in another network namespace
-/*
+	changed := false
 	var healthValue string
-	currentDevices := make(map[string]pluginapi.Device)
 
+	// getVirtualInterfaceList is only able to get devices in default
+	// namespace which means it'll not probe allocated devices, this
+	// also means it'll detect newly appeared devices( newly added
+	// devices or Pod released devices ).
+	// TODO: find a way to detect health state of allocated devices.
 	virtMap, err := getVirtualInterfaceList()
 	if err != nil {
 		glog.Errorf("Error. No Virtual network device found")
@@ -175,14 +178,13 @@ func (vm *virtManager) Probe() bool {
 		} else {
 			healthValue = "Unhealthy"
 		}
-		currentDevices[addr] = pluginapi.Device{ID: addr, Health: healthValue}
+		device := vm.devices[addr]
+		if device.Health != healthValue {
+			vm.devices[addr] = pluginapi.Device{ID: addr, Health: healthValue}
+			changed = true
+		}
 	}
-	if !reflect.DeepEqual(vm.devices, currentDevices) {
-		vm.devices = currentDevices
-		return true
-	}
-*/
-	return false
+	return changed
 }
 
 // Discovers capabable virtual devices
