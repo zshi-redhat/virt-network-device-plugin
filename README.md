@@ -1,6 +1,5 @@
 # Virt Network device plugin for Kubernetes
-[![Travis CI](https://travis-ci.com/zshi-redhat/virt-network-device-plugin.svg?branch=master)](https://travis-ci.com/zshi-redhat/virt-network-device-plugin/builds)
-
+[![Travis CI](https://travis-ci.org/zshi-redhat/virt-network-device-plugin.svg?branch=master)](https://travis-ci.org/zshi-redhat/virt-network-device-plugin/builds)
 ## Table of Contents
 
 - [Virt Network device plugin](#virt-network-device-plugin)
